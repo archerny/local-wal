@@ -1,1 +1,3 @@
-# local_redo_log
+# local write ahead log
+
+A simple local write ahead log
