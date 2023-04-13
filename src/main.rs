@@ -1,7 +1,21 @@
-use std::string::String;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    string::String,
+    sync::atomic::AtomicI32,
+};
 // use bytes::Buf;
 fn main() {
     println!("Hello, world!");
+}
+
+#[derive(Debug)]
+pub enum Error {
+    /// IOError wrapps io::Error
+    IOError(io::Error),
+
+    /// Error about invalid options and arguments
+    InvalidArgs(String),
 }
 
 // Options for local file based WAL.
@@ -15,7 +29,7 @@ pub struct Options {
 }
 
 #[derive(Debug)]
-pub struct WALFile {}
+pub struct WALWritableFile {}
 
 /// The encoding of blocks is largely borrowed from LevelDB's/RocksDB's write ahead log. Log file
 /// consists of a sequence of variable length records. Records are grouped by BlockSize(32k).
@@ -42,6 +56,55 @@ pub trait LocalWAL {
 
     fn first_seq();
     fn last_seq();
+}
+
+pub struct WALManager {
+    wal_dir: PathBuf,
+    log_num: AtomicI32,
+}
+
+impl WALManager {
+
+    /// with_wal_dir sets the write ahead log directory
+    fn with_wal_dir(self: &mut Self, dir: String) -> Result<(), Error> {
+        let path = Path::new(&dir);
+        let mut canonicalized_path = PathBuf::new();
+
+        match path.canonicalize() {
+            Ok(pathbuf) => canonicalized_path = pathbuf,
+            Err(e) => {
+                return Err(Error::IOError(e));
+            }
+        }
+        // If the specified path is not on file system, we will create it.
+        if !canonicalized_path.exists() {
+            match fs::create_dir_all(canonicalized_path.clone()) {
+                Ok(()) => println!("test"),
+                Err(e) => {
+                    return Err(Error::IOError(e));
+                }
+            }
+        }
+        // Check the path. If the path is a regular file or something else, the procedure will fail.
+        if !canonicalized_path.is_dir() {
+            return Err(Error::InvalidArgs(format!(
+                "WAL dir path({}) exists, but it is not a directory",
+                dir
+            )));
+        }
+        self.wal_dir = canonicalized_path;
+        Ok(())
+    }
+
+    fn gen_next_full_path(self: &Self) -> String {
+        let formatted_num = format!(
+            "{:10}",
+            self.log_num
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        );
+
+        String::from("test")
+    }
 }
 
 pub struct LocalWALEntry {
