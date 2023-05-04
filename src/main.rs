@@ -4,6 +4,8 @@ use std::{
     string::String,
     sync::atomic::AtomicI32,
 };
+
+use bytes::BytesMut;
 // use bytes::Buf;
 fn main() {
     println!("Hello, world!");
@@ -40,8 +42,37 @@ pub struct WALWritableFile {}
 #[derive(Debug)]
 pub struct Block {}
 
+/// The record format is also borrowed from RocksDB's `Legacy Record Format`
+/// +---------+-----------+-----------+--- ... ---+
+/// |CRC (4B) | Size (2B) | Kind (1B) | Payload   |
+/// +---------+-----------+-----------+--- ... ---+
+/// 
+/// CRC = 32bit hash computed over the payload using CRC
+/// Size = Length of the payload data
+/// Kind = Type of record
+///       (kZeroType, kFullType, kFirstType, kLastType, kMiddleType )
+///       The type is used to group a bunch of records together to represent
+///       blocks that are larger than kBlockSize
+/// Payload = Byte stream as long as specified by the payload size
 #[derive(Debug)]
-pub struct Record {}
+pub struct Record {
+    crc32: u32,
+    size: u16,
+    kind: u8,
+    payload: BytesMut,
+}
+
+/// The Kind flag has the following states:
+/// 0: rest of page will be empty
+/// 1: a full record encoded in a single fragment
+/// 2: first fragment of a record
+/// 3: middle fragment of a record
+/// 4: final fragment of a record
+pub const R_KIND_ZERO: u8 = 0x0;
+pub const R_KIND_FULL: u8 = 0x1;
+pub const R_KIND_FIRST: u8 = 0x2;
+pub const R_KIND_MIDDLE: u8 = 0x3;
+pub const R_KIND_LAST: u8 = 0x4;
 
 pub trait LocalWAL {
     fn new(path: &str) -> Self;
@@ -96,16 +127,36 @@ impl WALManager {
         Ok(())
     }
 
-    fn gen_next_full_path(self: &Self) -> String {
+    /// gen_next_full_path generates the full path of next write ahead log
+    fn gen_next_full_path(self: &Self) -> PathBuf {
         let formatted_num = format!(
             "{:10}",
             self.log_num
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         );
-
-        String::from("test")
+        self.wal_dir.clone().join(formatted_num)
     }
 }
+
+
+pub struct WritableLogFile {
+    full_path: PathBuf,
+}
+
+impl WritableLogFile {
+    fn open()->Result<Self, Error> {
+    }
+
+    fn create()->Result<Self, Error> {
+
+    }
+
+    fn close(self: &Self)->Result<(), Error> {
+        Ok(())
+    }
+
+}
+
 
 pub struct LocalWALEntry {
     id: i64,
@@ -146,6 +197,8 @@ impl LocalWAL for LocalFileWALImpl {
 mod tests {
     use super::*;
     use bytes::Buf;
+    use crc32fast::Hasher;
+    use crc32fast;
 
     #[test]
     fn test_buffer() {
@@ -161,5 +214,10 @@ mod tests {
         buf.copy_to_slice(&mut rest);
 
         assert_eq!(&rest[..], &b"lo world"[..]);
+    }
+
+    #[test]
+    fn test_crc32() {
+        let checksum = crc32fast::hash(b"foo bar baz");
     }
 }
